@@ -44,6 +44,21 @@
   --sar: env(safe-area-inset-right, 0px);
 }
 
+/* ── LIGHT THEME ── */
+:root[data-theme="light"]{
+  --bg:#FFFFFF;
+  --surface:#F8F9FB;
+  --surface2:#F0F2F7;
+  --surface3:#E8EAF0;
+  --border:rgba(0,0,0,0.08);
+  --text:#0F1117;
+  --text-dim:#64748B;
+  --accent:#3B82F6;
+  --accent-dim:rgba(59,130,246,0.15);
+  --income:#22C55E;
+  --expense:#EF4444;
+}
+
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{
   height:100%;background:var(--bg);color:var(--text);
@@ -325,6 +340,50 @@ datalist{display:none;}
 
 /* ── INLINE SUBHEADER ── */
 .sub-hdr{font-size:13px;font-weight:700;color:var(--text);margin:18px 0 10px;}
+
+/* ── SETTINGS MODAL ── */
+.modal-overlay{
+  display:none;position:fixed;top:0;left:0;right:0;bottom:0;
+  background:rgba(0,0,0,0.5);z-index:999;
+  -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+}
+.modal-overlay.open{display:flex;align-items:flex-end;justify-content:center;}
+.modal-sheet{
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:var(--radius) var(--radius) 0 0;
+  width:100%;max-width:600px;padding:24px 20px;
+  padding-bottom:calc(20px + var(--sab));
+  animation:slideUp .3s ease;
+  max-height:80vh;overflow-y:auto;
+}
+@keyframes slideUp{from{transform:translateY(100%);}to{transform:none;}}
+.modal-close{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;
+}
+.modal-close h2{font-size:17px;font-weight:700;margin:0;}
+.modal-close button{background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;}
+
+/* ── THEME TOGGLE ── */
+.theme-toggle{
+  display:flex;gap:8px;margin-bottom:14px;
+}
+.theme-toggle button{
+  flex:1;padding:12px;border-radius:var(--radius-sm);
+  border:1px solid var(--border);background:var(--surface2);
+  color:var(--text-dim);font-size:14px;font-weight:600;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+}
+.theme-toggle button.active{
+  background:var(--accent);border-color:var(--accent);color:#fff;
+}
+.theme-toggle button .ico{font-size:20px;}
+
+.setting-item{
+  padding:12px 0;border-bottom:1px solid var(--border);
+}
+.setting-item:last-child{border-bottom:none;}
+.setting-item .label{font-size:13px;font-weight:600;margin-bottom:6px;}
+.setting-item .hint{font-size:12px;color:var(--text-dim);}
 </style>
 </head>
 <body>
@@ -337,9 +396,53 @@ datalist{display:none;}
       <div class="top-bar-sub" id="todayPill">—</div>
     </div>
     <div class="top-bar-actions">
+      <button class="icon-btn" id="settingsBtn" title="Settings">⚙</button>
       <button class="icon-btn" id="backupBtn" title="Backup">💾</button>
       <button class="icon-btn" id="restoreBtn" title="Restore">⤴</button>
       <input type="file" id="restoreFileInput" accept=".json" style="display:none">
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal-sheet">
+      <div class="modal-close">
+        <h2>Settings</h2>
+        <button id="settingsClose">✕</button>
+      </div>
+      
+      <div class="setting-item">
+        <div class="label">Theme</div>
+        <div class="theme-toggle">
+          <button id="themeDark" class="active" data-theme="dark">
+            <span class="ico">🌙</span>
+            <span>Dark</span>
+          </button>
+          <button id="themeLight" data-theme="light">
+            <span class="ico">☀️</span>
+            <span>Light</span>
+          </button>
+          <button id="themeAuto" data-theme="auto">
+            <span class="ico">🔄</span>
+            <span>System</span>
+          </button>
+        </div>
+        <div class="hint">Dark mode uses less battery on OLED screens.</div>
+      </div>
+
+      <div class="setting-item">
+        <div class="label">Data Management</div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="btn-primary" id="settingsBackup" style="font-size:13px;">💾 Backup Now</button>
+          <button class="btn-ghost" id="settingsRestore" style="font-size:13px;">⤴ Restore</button>
+        </div>
+        <div class="hint" style="margin-top:8px;">Download a backup of all your data. Restore anytime.</div>
+      </div>
+
+      <div class="setting-item">
+        <div class="label">About</div>
+        <div class="hint">Home Ledger v1.0 — Personal Finance Tracker<br>All data stored locally on your device.</div>
+      </div>
     </div>
   </div>
 
@@ -614,6 +717,78 @@ function colorFor(src){ let i=state.sources.indexOf(src); return SOURCE_COLORS[(
 function fmt(n){ return 'Rs. '+Number(n).toLocaleString('en-PK',{minimumFractionDigits:0,maximumFractionDigits:0}); }
 function fmtSmall(n){ return 'Rs. '+Number(n).toLocaleString('en-PK',{minimumFractionDigits:0,maximumFractionDigits:0}); }
 
+// ═══════════════ THEME MANAGEMENT ═══════════════
+const themeKey = 'ledgerTheme';
+
+function getSystemTheme(){
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function applyTheme(themeName){
+  let actualTheme = themeName;
+  if(themeName === 'auto'){
+    actualTheme = getSystemTheme();
+  }
+  document.documentElement.setAttribute('data-theme', actualTheme);
+  localStorage.setItem(themeKey, themeName);
+  updateThemeButtons(themeName);
+}
+
+function updateThemeButtons(themeName){
+  document.querySelectorAll('.theme-toggle button').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.theme === themeName);
+  });
+}
+
+function initTheme(){
+  const savedTheme = localStorage.getItem(themeKey) || 'auto';
+  applyTheme(savedTheme);
+}
+
+// ═══════════════ SETTINGS MODAL ═══════════════
+document.getElementById('settingsBtn').addEventListener('click', ()=>{
+  document.getElementById('settingsModal').classList.add('open');
+});
+
+document.getElementById('settingsClose').addEventListener('click', ()=>{
+  document.getElementById('settingsModal').classList.remove('open');
+});
+
+document.getElementById('settingsModal').addEventListener('click', (e)=>{
+  if(e.target === document.getElementById('settingsModal')){
+    document.getElementById('settingsModal').classList.remove('open');
+  }
+});
+
+// Theme buttons
+document.querySelectorAll('.theme-toggle button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const theme = btn.dataset.theme;
+    applyTheme(theme);
+  });
+});
+
+// Settings backup and restore buttons
+document.getElementById('settingsBackup').addEventListener('click', ()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`LedgerBackup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+});
+
+document.getElementById('settingsRestore').addEventListener('click', ()=>{
+  document.getElementById('restoreFileInput').click();
+});
+
+// System theme change listener
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>{
+  const currentTheme = localStorage.getItem(themeKey) || 'auto';
+  if(currentTheme === 'auto'){
+    applyTheme('auto');
+  }
+});
+
 // ═══════════════ NAVIGATION ═══════════════
 let currentPage = 'pg-dashboard';
 document.querySelectorAll('.tab-btn').forEach(btn=>{
@@ -659,8 +834,11 @@ function computePaymentsDueTotal(){
 }
 function computeCCOutstanding(){
   const charged=state.ccTransactions.reduce((s,t)=>s+Number(t.amount||0),0);
-  const paid=state.ccBills.filter(b=>b.status==='paid').reduce((s,b)=>s+Number(b.amount||0),0);
-  return charged-paid;
+  // Count only the amount already paid (from payment transactions)
+  const paidViaTransactions=state.transactions
+    .filter(t=>t.category==='Credit Card Payment')
+    .reduce((s,t)=>s+Number(t.amount||0),0);
+  return charged-paidViaTransactions;
 }
 function computeFixedExpenseSummary(){
   let total=0,paid=0;
@@ -917,14 +1095,25 @@ function renderCreditCard(){
     billEmpty.style.display='none';
     billList.innerHTML=[...state.ccBills].sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||'')).map(b=>{
       const ov=isOverdue(b.dueDate,b.status);
-      return `<div class="tx-row" style="${b.status==='paid'?'opacity:.5':''}">
+      // Calculate paid amount for this bill
+      const paidForThisBill=state.transactions
+        .filter(t=>t.category==='Credit Card Payment'&&t.note&&t.note.includes('Bill #'+b.id))
+        .reduce((s,t)=>s+Number(t.amount||0),0);
+      const remaining=Math.max(0,b.amount-paidForThisBill);
+      const isPaidInFull=remaining<=0;
+      return `<div class="tx-row" style="${isPaidInFull?'opacity:.5':''}">
         <div class="tx-icon exp">🧾</div>
         <div class="tx-info">
           <div class="cat">${b.note||'Statement'}</div>
           <div class="meta">${b.dueDate?'Due '+b.dueDate:''}${b.source?' · From: '+b.source:''}</div>
-          <div style="margin-top:4px;display:flex;gap:6px;align-items:center;">
-            <span class="stag ${b.status==='paid'?'paid':ov?'overdue':'unpaid'}">${b.status==='paid'?'Paid':ov?'⚠ Overdue':'Unpaid'}</span>
-            ${b.status!=='paid'?`<button class="btn-ghost" data-ccbill-pay="${b.id}" style="font-size:11px;padding:4px 8px;">Mark Paid</button>`:''}
+          <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span class="stag ${isPaidInFull?'paid':ov?'overdue':'unpaid'}">${isPaidInFull?'✓ Fully Paid':paidForThisBill>0?`Partial (Rs. ${fmt(remaining)} left)`:ov?'⚠ Overdue':'Unpaid'}</span>
+            ${!isPaidInFull?`
+              <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                <input type="number" placeholder="Amount" min="0" step="0.01" class="ccbill-payamt" data-billid="${b.id}" style="width:80px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;">
+                <button class="btn-ghost" data-ccbill-pay="${b.id}" style="font-size:11px;padding:4px 8px;">Pay</button>
+              </div>
+            `:''}
           </div>
         </div>
         <div class="tx-amt exp">${fmt(b.amount)}</div>
@@ -933,21 +1122,48 @@ function renderCreditCard(){
     }).join('');
     billList.querySelectorAll('[data-ccbill-pay]').forEach(btn=>{
       btn.addEventListener('click',()=>{
-        const b=state.ccBills.find(x=>x.id===Number(btn.dataset.ccbillPay));
-        if(!b||b.status==='paid') return;
-        if(b.source){
-          const txId=Date.now();
-          state.transactions.push({id:txId,type:'expense',amount:b.amount,source:b.source,category:'Credit Card Payment',date:new Date().toISOString().slice(0,10),note:'CC bill'+(b.note?' — '+b.note:'')});
+        const billId=Number(btn.dataset.ccbillPay);
+        const b=state.ccBills.find(x=>x.id===billId);
+        const payAmtInput=btn.parentElement.querySelector('.ccbill-payamt');
+        const payAmt=parseFloat(payAmtInput?.value||0);
+        
+        if(!b||!b.source){alert('Invalid bill or no source selected.');return;}
+        if(!payAmt||payAmt<=0){alert('Enter a payment amount.');return;}
+        
+        // Calculate how much is left to pay
+        const alreadyPaid=state.transactions
+          .filter(t=>t.category==='Credit Card Payment'&&t.note&&t.note.includes('Bill #'+billId))
+          .reduce((s,t)=>s+Number(t.amount||0),0);
+        if(alreadyPaid+payAmt>b.amount){
+          alert(`Can't pay more than bill amount. Remaining: Rs. ${fmt(b.amount-alreadyPaid)}`);
+          return;
+        }
+        
+        // Add payment transaction
+        const txId=Date.now();
+        state.transactions.push({
+          id:txId,
+          type:'expense',
+          amount:payAmt,
+          source:b.source,
+          category:'Credit Card Payment',
+          date:new Date().toISOString().slice(0,10),
+          note:'Bill #'+billId
+        });
+        
+        // Mark fully paid if all amount paid
+        if(alreadyPaid+payAmt>=b.amount){
+          b.status='paid';
           b.payTxId=txId;
         }
-        b.status='paid';save();renderAll();
+        
+        save();renderAll();
       });
     });
     billList.querySelectorAll('[data-ccbill-del]').forEach(btn=>{
       btn.addEventListener('click',()=>{
         const b=state.ccBills.find(x=>x.id===Number(btn.dataset.ccbillDel));
-        if(confirm('Delete statement?')){
-          if(b&&b.payTxId) state.transactions=state.transactions.filter(t=>t.id!==b.payTxId);
+        if(confirm('Delete statement? (Payments for this bill will remain)')){
           state.ccBills=state.ccBills.filter(x=>x.id!==Number(btn.dataset.ccbillDel));
           save();renderAll();
         }
@@ -1214,6 +1430,7 @@ function renderAll(){
 
 // ═══════════════ INIT ═══════════════
 function init(){
+  initTheme();
   document.getElementById('todayPill').textContent=new Date().toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'});
   document.getElementById('dateInput').value=new Date().toISOString().slice(0,10);
   document.getElementById('ccTxDateInput').value=new Date().toISOString().slice(0,10);
