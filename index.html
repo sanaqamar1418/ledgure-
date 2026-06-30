@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<title>Home Ledger</title>
+
+<!-- PWA / iOS -->
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ledger">
+<meta name="theme-color" content="#0F1117">
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- External libs -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+/* ── TOKENS ── */
+:root{
+  --bg:#0F1117;
+  --surface:#1C1F2A;
+  --surface2:#252836;
+  --surface3:#2E3347;
+  --border:rgba(255,255,255,0.08);
+  --text:#F0F2FF;
+  --text-dim:#8A8FA8;
+  --accent:#3B82F6;
+  --accent-dim:rgba(59,130,246,0.4);
+  --income:#22C55E;
+  --expense:#EF4444;
+  --radius:16px;
+  --radius-sm:10px;
+  --mono:'SF Mono','Menlo','Courier New',monospace;
+  --sys:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+
+  /* safe-areas */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{
+  height:100%;background:var(--bg);color:var(--text);
+  font-family:var(--sys);font-size:15px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior:none;
+}
+
+/* ── SHELL ── */
+#shell{
+  display:flex;flex-direction:column;
+  height:100dvh;
+  padding-top:calc(var(--sat) + 0px);
+}
+
+/* ── TOP BAR ── */
+.top-bar{
+  background:var(--bg);
+  padding:14px 20px 10px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  gap:12px;
+  flex-shrink:0;
+  backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);
+  position:sticky;top:0;z-index:100;
+}
+.top-bar-title{font-size:17px;font-weight:700;letter-spacing:-0.3px;}
+.top-bar-sub{font-size:11px;color:var(--text-dim);margin-top:1px;}
+.top-bar-actions{display:flex;gap:8px;}
+.icon-btn{
+  background:var(--surface2);border:none;color:var(--text);
+  width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:16px;cursor:pointer;flex-shrink:0;
+}
+
+/* ── SCROLL AREA ── */
+#pageScroll{
+  flex:1;overflow-y:auto;overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
+}
+
+/* ── BOTTOM TAB BAR ── */
+.tab-bar{
+  display:flex;
+  background:rgba(15,17,23,0.92);
+  border-top:1px solid var(--border);
+  padding-bottom:calc(var(--sab) + 4px);
+  padding-top:4px;
+  backdrop-filter:blur(24px);
+  -webkit-backdrop-filter:blur(24px);
+  flex-shrink:0;
+}
+.tab-btn{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  gap:2px;padding:6px 4px;
+  background:none;border:none;cursor:pointer;
+  color:var(--text-dim);font-size:10px;font-weight:600;
+  letter-spacing:0.02em;transition:color .15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.tab-btn .ti{font-size:22px;line-height:1;}
+.tab-btn.active{color:var(--accent);}
+.tab-btn.active .ti{transform:scale(1.1);}
+
+/* ── PAGES ── */
+.page{display:none;padding:16px 16px calc(8px);animation:fadeUp .2s ease;}
+.page.active{display:block;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+
+/* ── SUMMARY CARDS (Dashboard) ── */
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+.s-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:14px;
+}
+.s-card.wide{grid-column:span 2;}
+.s-card.accent-top{border-top:3px solid var(--accent);}
+.s-card .lbl{font-size:10px;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-dim);font-weight:700;margin-bottom:6px;}
+.s-card .val{font-family:var(--mono);font-size:20px;font-weight:700;letter-spacing:-0.5px;}
+.s-card.wide .val{font-size:26px;color:var(--accent);}
+.income-val{color:var(--income)!important;}
+.expense-val{color:var(--expense)!important;}
+
+/* ── SECTION HEADER ── */
+.sec-hdr{
+  font-size:13px;font-weight:700;color:var(--text-dim);
+  text-transform:uppercase;letter-spacing:0.07em;
+  margin:20px 0 10px;
+}
+
+/* ── CARD PANEL ── */
+.panel{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:16px;margin-bottom:12px;
+}
+.panel-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.panel-hdr h2{font-size:15px;font-weight:700;}
+
+/* ── FORM ── */
+.field{margin-bottom:12px;}
+.field label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:5px;font-weight:600;}
+.field input,.field select,.field textarea{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);padding:12px;border-radius:var(--radius-sm);
+  font-size:15px;font-family:var(--sys);appearance:none;-webkit-appearance:none;
+}
+.field input:focus,.field select:focus{outline:none;border-color:var(--accent-dim);}
+.type-toggle{display:flex;gap:8px;margin-bottom:14px;}
+.type-toggle button{
+  flex:1;padding:12px;border-radius:var(--radius-sm);
+  border:1px solid var(--border);background:var(--surface2);
+  color:var(--text-dim);font-size:14px;font-weight:600;cursor:pointer;
+}
+.type-toggle button.active[data-type="expense"]{background:rgba(239,68,68,0.12);border-color:var(--expense);color:var(--expense);}
+.type-toggle button.active[data-type="income"]{background:rgba(34,197,94,0.12);border-color:var(--income);color:var(--income);}
+.btn-primary{
+  width:100%;background:var(--accent);color:#fff;
+  border:none;padding:14px;border-radius:var(--radius-sm);
+  font-size:15px;font-weight:700;cursor:pointer;margin-top:4px;
+}
+.btn-primary:active{filter:brightness(0.9);}
+.btn-ghost{
+  background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;
+}
+
+/* ── TX LIST ── */
+.tx-list{display:flex;flex-direction:column;gap:0;}
+.tx-row{
+  display:flex;align-items:center;gap:12px;
+  padding:12px 0;border-bottom:1px solid var(--border);
+}
+.tx-row:last-child{border-bottom:none;}
+.tx-icon{
+  width:38px;height:38px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;flex-shrink:0;
+}
+.tx-icon.inc{background:rgba(34,197,94,0.15);}
+.tx-icon.exp{background:rgba(239,68,68,0.12);}
+.tx-info{flex:1;min-width:0;}
+.tx-info .cat{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tx-info .meta{font-size:12px;color:var(--text-dim);}
+.tx-amt{font-family:var(--mono);font-size:15px;font-weight:700;flex-shrink:0;}
+.tx-amt.inc{color:var(--income);}
+.tx-amt.exp{color:var(--expense);}
+.tx-del{background:none;border:none;color:var(--text-dim);font-size:18px;padding:6px;cursor:pointer;flex-shrink:0;}
+
+/* ── FILTER BAR ── */
+.filter-bar{
+  display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:12px;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;
+}
+.filter-bar::-webkit-scrollbar{display:none;}
+.filter-chip{
+  white-space:nowrap;background:var(--surface2);border:1px solid var(--border);
+  color:var(--text-dim);padding:7px 12px;border-radius:20px;font-size:12px;
+  font-weight:600;cursor:pointer;flex-shrink:0;
+}
+.filter-chip.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+
+/* ── PILL SOURCE TABS ── */
+.pill-tabs{display:flex;gap:8px;overflow-x:auto;margin-bottom:14px;padding-bottom:4px;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.pill-tabs::-webkit-scrollbar{display:none;}
+.pill-tab{
+  flex-shrink:0;display:flex;align-items:center;gap:6px;
+  background:var(--surface2);border:1px solid var(--border);
+  color:var(--text-dim);padding:8px 14px;border-radius:20px;
+  font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;
+}
+.pill-tab .dot{width:8px;height:8px;border-radius:50%;}
+.pill-tab.active{background:var(--surface3);color:var(--text);border-color:currentColor;}
+
+/* ── BALANCE BAR ── */
+.balance-bar{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:14px;margin-bottom:14px;
+  display:flex;align-items:baseline;gap:10px;
+}
+.balance-bar .lbl{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;}
+.balance-bar .val{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--accent);}
+
+/* ── STATUS TAG ── */
+.stag{
+  display:inline-block;padding:3px 9px;border-radius:20px;
+  font-size:11px;font-weight:700;
+}
+.stag.paid{background:rgba(34,197,94,0.14);color:var(--income);}
+.stag.unpaid{background:rgba(239,68,68,0.10);color:var(--expense);}
+.stag.overdue{background:rgba(239,68,68,0.18);color:var(--expense);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.6;}}
+
+/* ── MANAGE SOURCES ── */
+.src-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+.src-chip{
+  display:flex;align-items:center;gap:6px;
+  background:var(--surface2);border:1px solid var(--border);
+  padding:5px 10px;border-radius:20px;font-size:12px;
+}
+.src-chip .x{
+  cursor:pointer;color:var(--text-dim);font-size:16px;
+  width:20px;height:20px;display:flex;align-items:center;justify-content:center;
+  border-radius:50%;margin-left:2px;
+}
+.src-chip .x:active{background:var(--expense);color:#fff;}
+
+/* ── MONTH NAV ── */
+.month-nav{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.month-nav button{
+  background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  width:36px;height:36px;border-radius:50%;font-size:16px;cursor:pointer;
+}
+.month-nav .lbl{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--accent);flex:1;text-align:center;}
+
+/* ── FE SUMMARY BOXES ── */
+.fe-sum{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
+.fe-sum-box{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;}
+.fe-sum-box .l{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700;margin-bottom:4px;}
+.fe-sum-box .v{font-family:var(--mono);font-size:16px;font-weight:700;}
+
+/* ── FE ROW ── */
+.fe-row{
+  padding:12px 0;border-bottom:1px solid var(--border);
+  display:flex;align-items:flex-start;gap:10px;
+}
+.fe-row:last-child{border-bottom:none;}
+.fe-row-info{flex:1;min-width:0;}
+.fe-row-info .name{font-size:14px;font-weight:600;}
+.fe-row-info .meta{font-size:12px;color:var(--text-dim);margin-top:2px;}
+.fe-toggle{
+  background:none;border:1px solid var(--border);
+  padding:6px 12px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;
+  color:var(--text-dim);white-space:nowrap;flex-shrink:0;
+}
+.fe-toggle.paid{background:rgba(34,197,94,0.12);border-color:var(--income);color:var(--income);}
+.fe-toggle.unpaid{background:rgba(239,68,68,0.07);border-color:var(--expense);color:var(--expense);}
+
+/* ── BS ── */
+.bs-side{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:12px;}
+.bs-side h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;}
+.bs-side.assets h3{color:var(--income);}
+.bs-side.liabilities h3{color:var(--expense);}
+.bs-item{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;}
+.bs-item:last-child{border-bottom:none;}
+.bs-item .k{color:var(--text-dim);}
+.bs-item .v{font-family:var(--mono);font-weight:700;}
+.bs-total{display:flex;justify-content:space-between;padding:10px 0 0;border-top:2px solid var(--border);margin-top:6px;font-weight:700;font-size:14px;}
+.bs-net{
+  background:var(--surface);border:2px solid var(--accent);border-radius:var(--radius);
+  padding:18px 20px;display:flex;justify-content:space-between;align-items:center;margin-top:4px;
+}
+.bs-net .lbl{font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;font-weight:700;}
+.bs-net .v{font-family:var(--mono);font-size:26px;font-weight:800;color:var(--accent);}
+
+/* ── CC SUMMARY STRIP ── */
+.cc-strip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;}
+.cc-box{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;}
+.cc-box .l{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700;margin-bottom:4px;}
+.cc-box .v{font-family:var(--mono);font-size:15px;font-weight:700;}
+
+/* ── EMPTY STATE ── */
+.empty{text-align:center;padding:40px 20px;color:var(--text-dim);}
+.empty .ico{font-size:40px;margin-bottom:8px;}
+
+/* ── DATALIST dropdown fix ── */
+datalist{display:none;}
+
+/* ── SCROLLBARS ── */
+::-webkit-scrollbar{width:0;height:0;}
+
+/* ── SELECT arrow ── */
+.field select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238A8FA8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;}
+
+/* ── INLINE SEGMENT ── */
+.seg{display:flex;background:var(--surface2);border-radius:var(--radius-sm);padding:3px;gap:2px;margin-bottom:14px;}
+.seg button{flex:1;padding:9px 4px;border:none;border-radius:8px;background:none;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;}
+.seg button.active{background:var(--surface3);color:var(--text);}
+
+/* ── INLINE SUBHEADER ── */
+.sub-hdr{font-size:13px;font-weight:700;color:var(--text);margin:18px 0 10px;}
+</style>
+</head>
+<body>
+<div id="shell">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div>
+      <div class="top-bar-title">💰 Home Ledger</div>
+      <div class="top-bar-sub" id="todayPill">—</div>
+    </div>
+    <div class="top-bar-actions">
+      <button class="icon-btn" id="backupBtn" title="Backup">💾</button>
+      <button class="icon-btn" id="restoreBtn" title="Restore">⤴</button>
+      <input type="file" id="restoreFileInput" accept=".json" style="display:none">
+    </div>
+  </div>
+
+  <!-- SCROLL AREA -->
+  <div id="pageScroll">
+
+    <!-- ═══════════════════════ PAGE: DASHBOARD ═══════════════════════ -->
+    <div class="page active" id="pg-dashboard">
+      <div style="padding:16px 16px 100px;">
+
+        <div class="card-grid" id="summaryCards"></div>
+
+        <div class="sec-hdr">Add Transaction</div>
+        <div class="panel">
+          <div class="type-toggle">
+            <button data-type="expense" class="active" id="typeExpenseBtn">↓ Expense</button>
+            <button data-type="income" id="typeIncomeBtn">↑ Income</button>
+          </div>
+          <div class="field">
+            <label>Amount (Rs.)</label>
+            <input type="number" id="amountInput" placeholder="0" inputmode="decimal" min="0" step="0.01">
+          </div>
+          <div class="field">
+            <label>Source</label>
+            <select id="sourceSelect"></select>
+          </div>
+          <div class="field">
+            <label>Category</label>
+            <input type="text" id="categoryInput" placeholder="e.g. Groceries, Salary" list="categoryList">
+            <datalist id="categoryList"></datalist>
+          </div>
+          <div class="field">
+            <label>Date</label>
+            <input type="date" id="dateInput">
+          </div>
+          <div class="field">
+            <label>Note (optional)</label>
+            <input type="text" id="noteInput" placeholder="Short note">
+          </div>
+          <button class="btn-primary" id="addBtn">Add Transaction</button>
+        </div>
+
+        <div class="sec-hdr">Manage Sources</div>
+        <div class="panel">
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="newSourceInput" placeholder="e.g. EasyPaisa" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:11px;border-radius:var(--radius-sm);font-size:14px;">
+            <button class="btn-ghost" id="addSourceBtn">+ Add</button>
+          </div>
+          <div class="src-chips" id="existingSources"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ PAGE: TRANSACTIONS ═══════════════════════ -->
+    <div class="page" id="pg-transactions">
+      <div style="padding:16px 16px 100px;">
+
+        <div class="panel-hdr" style="margin-bottom:0;">
+          <h2 style="font-size:15px;font-weight:700;">All Transactions</h2>
+          <div style="display:flex;gap:8px;">
+            <button class="btn-ghost" id="exportExcelBtn" style="font-size:12px;padding:8px 10px;">⬇ Excel</button>
+            <button class="btn-ghost" id="exportPdfBtn" style="font-size:12px;padding:8px 10px;">⬇ PDF</button>
+          </div>
+        </div>
+
+        <div class="filter-bar" style="margin-top:12px;">
+          <select id="filterSource" class="filter-chip" style="border-radius:20px;appearance:none;-webkit-appearance:none;padding:7px 12px;cursor:pointer;background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);font-size:12px;font-weight:600;">
+            <option value="">All Sources</option>
+          </select>
+          <button class="filter-chip active" data-ftype="" id="fAll">All</button>
+          <button class="filter-chip" data-ftype="expense" id="fExp">Expenses</button>
+          <button class="filter-chip" data-ftype="income" id="fInc">Income</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <input type="date" id="filterFrom" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px;border-radius:var(--radius-sm);font-size:13px;">
+          <input type="date" id="filterTo" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px;border-radius:var(--radius-sm);font-size:13px;">
+          <button class="btn-ghost" id="clearFilters" style="font-size:12px;padding:9px 12px;">Clear</button>
+        </div>
+
+        <div class="panel">
+          <div class="tx-list" id="txList"></div>
+          <div class="empty" id="txEmpty" style="display:none;"><div class="ico">📒</div>No transactions yet.</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ PAGE: SOURCES ═══════════════════════ -->
+    <div class="page" id="pg-sources">
+      <div style="padding:16px 16px 100px;">
+        <div class="sec-hdr">Source Details</div>
+        <div class="pill-tabs" id="sourceTabs"></div>
+        <div class="balance-bar" id="sourceDetailBalance"></div>
+        <div class="panel">
+          <div class="tx-list" id="sourceDetailBody"></div>
+          <div class="empty" id="sourceDetailEmpty" style="display:none;"><div class="ico">📭</div>No transactions for this source.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ PAGE: TOOLS (tabbed) ═══════════════════════ -->
+    <div class="page" id="pg-tools">
+      <div style="padding:16px 16px 100px;">
+
+        <!-- Inner segment control -->
+        <div class="seg" id="toolSeg">
+          <button class="active" data-tool="payments">🔔 Due</button>
+          <button data-tool="cc">💳 CC</button>
+          <button data-tool="fixed">📌 Fixed</button>
+          <button data-tool="bs">⚖️ Balance</button>
+        </div>
+
+        <!-- ── PAYMENTS DUE ── -->
+        <div id="tool-payments">
+          <div class="panel">
+            <div class="sub-hdr">Add Payment</div>
+            <div class="field"><label>Who / What</label><input type="text" id="pdWhoInput" placeholder="e.g. Loan from Ahmed"></div>
+            <div class="field">
+              <label>Type</label>
+              <select id="pdTypeSelect">
+                <option value="borrowed">Borrowed</option>
+                <option value="payable">Payable</option>
+              </select>
+            </div>
+            <div class="field"><label>Amount (Rs.)</label><input type="number" id="pdAmountInput" placeholder="0" inputmode="decimal" min="0" step="0.01"></div>
+            <div class="field"><label>Due Date</label><input type="date" id="pdDueDateInput"></div>
+            <div class="field"><label>Note (optional)</label><input type="text" id="pdNoteInput" placeholder="Short note"></div>
+            <button class="btn-primary" id="pdAddBtn">Add Payment</button>
+          </div>
+          <div class="panel" style="padding:0 16px;">
+            <div id="pdList"></div>
+            <div class="empty" id="pdEmpty" style="display:none;"><div class="ico">🔔</div>No payments due yet.</div>
+          </div>
+        </div>
+
+        <!-- ── CREDIT CARD ── -->
+        <div id="tool-cc" style="display:none;">
+          <div class="cc-strip" id="ccStrip">
+            <div class="cc-box"><div class="l">Charged</div><div class="v" id="ccTotalCharged">Rs. 0</div></div>
+            <div class="cc-box"><div class="l">Paid</div><div class="v" id="ccTotalPaid" style="color:var(--income);">Rs. 0</div></div>
+            <div class="cc-box"><div class="l">Outstanding</div><div class="v" id="ccOutstandingCard" style="color:var(--expense);">Rs. 0</div></div>
+          </div>
+          <div class="panel">
+            <div class="sub-hdr">Log Card Purchase</div>
+            <div class="field"><label>Amount (Rs.)</label><input type="number" id="ccTxAmountInput" placeholder="0" inputmode="decimal" min="0" step="0.01"></div>
+            <div class="field"><label>Category</label><input type="text" id="ccTxCategoryInput" placeholder="e.g. Groceries, Fuel" list="categoryList"></div>
+            <div class="field"><label>Date</label><input type="date" id="ccTxDateInput"></div>
+            <div class="field"><label>Note (optional)</label><input type="text" id="ccTxNoteInput" placeholder="Short note"></div>
+            <button class="btn-primary" id="ccTxAddBtn">Add Purchase</button>
+          </div>
+          <div class="panel">
+            <div class="sub-hdr">Add Statement / Bill</div>
+            <div class="field"><label>Amount (Rs.)</label><input type="number" id="ccBillAmountInput" placeholder="0" inputmode="decimal" min="0" step="0.01"></div>
+            <div class="field"><label>Due Date</label><input type="date" id="ccBillDueDateInput"></div>
+            <div class="field"><label>Pay From Account</label><select id="ccBillSourceSelect"></select></div>
+            <div class="field"><label>Note (optional)</label><input type="text" id="ccBillNoteInput" placeholder="e.g. June statement"></div>
+            <button class="btn-primary" id="ccBillAddBtn">Add Statement</button>
+          </div>
+          <div class="sub-hdr">Card Purchases</div>
+          <div class="panel" style="padding:0 16px;">
+            <div id="ccTxList"></div>
+            <div class="empty" id="ccTxEmpty" style="display:none;"><div class="ico">💳</div>No card purchases yet.</div>
+          </div>
+          <div class="sub-hdr">Statements / Bills</div>
+          <div class="panel" style="padding:0 16px;">
+            <div id="ccBillList"></div>
+            <div class="empty" id="ccBillEmpty" style="display:none;"><div class="ico">🧾</div>No statements yet.</div>
+          </div>
+        </div>
+
+        <!-- ── FIXED EXPENSES ── -->
+        <div id="tool-fixed" style="display:none;">
+          <div class="month-nav">
+            <button id="fePrevMonth">◀</button>
+            <div class="lbl" id="feMonthLabel" style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--accent);flex:1;text-align:center;"></div>
+            <button id="feNextMonth">▶</button>
+          </div>
+          <div class="fe-sum">
+            <div class="fe-sum-box"><div class="l">Total</div><div class="v" id="feTotalVal">Rs. 0</div></div>
+            <div class="fe-sum-box"><div class="l">Paid</div><div class="v" id="fePaidVal" style="color:var(--income);">Rs. 0</div></div>
+            <div class="fe-sum-box"><div class="l">Left</div><div class="v" id="feRemainingVal" style="color:var(--expense);">Rs. 0</div></div>
+          </div>
+          <div class="panel">
+            <div class="sub-hdr" style="margin-top:0;">Add Fixed Expense</div>
+            <div class="field"><label>Expense Name</label><input type="text" id="feNameInput" placeholder="e.g. Rent, Electricity"></div>
+            <div class="field"><label>Amount (Rs.)</label><input type="number" id="feAmountInput" placeholder="0" inputmode="decimal" min="0" step="0.01"></div>
+            <div class="field"><label>Category</label><input type="text" id="feCategoryInput" placeholder="e.g. Utilities, Housing" list="categoryList"></div>
+            <div class="field"><label>Source / Account</label><select id="feSourceSelect"></select></div>
+            <div class="field"><label>Due Day of Month</label><input type="number" id="feDueDayInput" placeholder="e.g. 5" inputmode="numeric" min="1" max="31"></div>
+            <div class="field"><label>Note (optional)</label><input type="text" id="feNoteInput" placeholder="Short note"></div>
+            <button class="btn-primary" id="feAddBtn">Add Fixed Expense</button>
+          </div>
+          <div class="panel" style="padding:0 16px;">
+            <div id="feList"></div>
+            <div class="empty" id="feEmpty" style="display:none;"><div class="ico">📌</div>No fixed expenses yet.</div>
+          </div>
+          <div style="text-align:center;margin-top:8px;">
+            <button class="btn-ghost" id="feExportBtn">⬇ Export Month to Excel</button>
+          </div>
+        </div>
+
+        <!-- ── BALANCE SHEET ── -->
+        <div id="tool-bs" style="display:none;">
+          <div class="panel">
+            <div class="sub-hdr" style="margin-top:0;">External Assets (Manual)</div>
+            <div class="field"><label>Property / Real Estate (Rs.)</label><input type="number" id="bsProperty" placeholder="0" inputmode="decimal" min="0"></div>
+            <div class="field"><label>Vehicle Value (Rs.)</label><input type="number" id="bsVehicle" placeholder="0" inputmode="decimal" min="0"></div>
+            <div class="field"><label>Investments / Stocks (Rs.)</label><input type="number" id="bsInvestments" placeholder="0" inputmode="decimal" min="0"></div>
+            <div class="field"><label>Gold / Jewelry (Rs.)</label><input type="number" id="bsGold" placeholder="0" inputmode="decimal" min="0"></div>
+            <div class="field"><label>Other Assets (Rs.)</label><input type="number" id="bsOtherAssets" placeholder="0" inputmode="decimal" min="0"></div>
+            <button class="btn-primary" id="bsSaveBtn">Update Balance Sheet</button>
+          </div>
+          <div class="bs-side assets">
+            <h3>🟢 Assets</h3>
+            <div id="bsAssetsBody"></div>
+            <div class="bs-total"><span>Total Assets</span><span id="bsTotalAssets" style="font-family:var(--mono);color:var(--income);">Rs. 0</span></div>
+          </div>
+          <div class="bs-side liabilities">
+            <h3>🔴 Liabilities</h3>
+            <div id="bsLiabilitiesBody"></div>
+            <div class="bs-total"><span>Total Liabilities</span><span id="bsTotalLiabilities" style="font-family:var(--mono);color:var(--expense);">Rs. 0</span></div>
+          </div>
+          <div class="bs-net">
+            <div><div class="lbl">Net Worth</div><div style="font-size:11px;color:var(--text-dim);margin-top:2px;">Assets − Liabilities</div></div>
+            <div class="v" id="bsNetWorth">Rs. 0</div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);text-align:center;margin-top:10px;padding-bottom:8px;">* Account balances are auto-calculated from your transactions.</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /pageScroll -->
+
+  <!-- BOTTOM TAB BAR -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-page="pg-dashboard">
+      <span class="ti">🏠</span>Dashboard
+    </button>
+    <button class="tab-btn" data-page="pg-transactions">
+      <span class="ti">📋</span>Transactions
+    </button>
+    <button class="tab-btn" data-page="pg-sources">
+      <span class="ti">🏦</span>Sources
+    </button>
+    <button class="tab-btn" data-page="pg-tools">
+      <span class="ti">🛠</span>Tools
+    </button>
+  </div>
+
+</div><!-- /shell -->
+
+<script>
+// ═══════════════ STATE ═══════════════
+const SOURCE_COLORS = ["#F59E0B","#3B82F6","#A855F7","#10B981","#F97316","#64748B","#EF4444"];
+
+let state = JSON.parse(localStorage.getItem('ledgerState')||'null') || {
+  sources:["Cash","Bank","JazzCash"],
+  transactions:[]
+};
+if(!state.payments) state.payments=[];
+if(!state.ccTransactions) state.ccTransactions=[];
+if(!state.ccBills) state.ccBills=[];
+if(!state.fixedExpenses) state.fixedExpenses=[];
+if(!state.fixedExpensePaid) state.fixedExpensePaid={};
+if(!state.bsAssets) state.bsAssets={property:0,vehicle:0,investments:0,gold:0,other:0};
+state.ccBills.forEach(b=>{if(!('payTxId' in b)) b.payTxId=null; if(!b.source) b.source=state.sources[0]||'';});
+
+function save(){ localStorage.setItem('ledgerState', JSON.stringify(state)); }
+function colorFor(src){ let i=state.sources.indexOf(src); return SOURCE_COLORS[(i<0?0:i)%SOURCE_COLORS.length]; }
+function fmt(n){ return 'Rs. '+Number(n).toLocaleString('en-PK',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+function fmtSmall(n){ return 'Rs. '+Number(n).toLocaleString('en-PK',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+
+// ═══════════════ NAVIGATION ═══════════════
+let currentPage = 'pg-dashboard';
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const pg = btn.dataset.page;
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.getElementById(pg).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentPage = pg;
+    document.getElementById('pageScroll').scrollTop = 0;
+  });
+});
+
+// ═══════════════ TOOL SEGMENT ═══════════════
+let currentTool = 'payments';
+document.querySelectorAll('#toolSeg button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    currentTool = btn.dataset.tool;
+    document.querySelectorAll('#toolSeg button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    ['payments','cc','fixed','bs'].forEach(t=>{
+      document.getElementById('tool-'+t).style.display = t===currentTool?'block':'none';
+    });
+  });
+});
+
+// ═══════════════ COMPUTE ═══════════════
+function computeTotals(){
+  const bySource={};
+  state.sources.forEach(s=>bySource[s]=0);
+  let totalExpense=0,totalIncome=0;
+  state.transactions.forEach(t=>{
+    if(!(t.source in bySource)) bySource[t.source]=0;
+    if(t.type==='income'){bySource[t.source]+=t.amount;totalIncome+=t.amount;}
+    else{bySource[t.source]-=t.amount;totalExpense+=t.amount;}
+  });
+  const totalBalance=Object.values(bySource).reduce((a,b)=>a+b,0);
+  return{bySource,totalExpense,totalIncome,totalBalance};
+}
+function computePaymentsDueTotal(){
+  return state.payments.filter(p=>p.status!=='paid').reduce((s,p)=>s+Number(p.amount||0),0);
+}
+function computeCCOutstanding(){
+  const charged=state.ccTransactions.reduce((s,t)=>s+Number(t.amount||0),0);
+  const paid=state.ccBills.filter(b=>b.status==='paid').reduce((s,b)=>s+Number(b.amount||0),0);
+  return charged-paid;
+}
+function computeFixedExpenseSummary(){
+  let total=0,paid=0;
+  state.fixedExpenses.forEach(fe=>{
+    total+=Number(fe.amount||0);
+    if(state.fixedExpensePaid[feCurrentMonth+':'+fe.id]) paid+=Number(fe.amount||0);
+  });
+  return{total,paid,remaining:total-paid};
+}
+
+// ═══════════════ POPULATE SELECTS ═══════════════
+function populateSelects(){
+  const opts = state.sources.map(s=>`<option value="${s}">${s}</option>`).join('');
+  document.getElementById('sourceSelect').innerHTML = opts;
+  document.getElementById('feSourceSelect').innerHTML = opts;
+  document.getElementById('ccBillSourceSelect').innerHTML = opts;
+  document.getElementById('filterSource').innerHTML = '<option value="">All Sources</option>'+opts;
+}
+
+function renderSourceChips(){
+  document.getElementById('existingSources').innerHTML = state.sources.map(s=>`
+    <div class="src-chip">
+      <span style="width:8px;height:8px;border-radius:50%;background:${colorFor(s)};"></span>
+      ${s}
+      <span class="x" data-src="${s}">✕</span>
+    </div>
+  `).join('');
+  document.querySelectorAll('#existingSources .x').forEach(el=>{
+    el.addEventListener('click',()=>{
+      const src=el.dataset.src;
+      if(state.transactions.some(t=>t.source===src)){ alert(`"${src}" has transactions — delete them first.`); return; }
+      if(state.sources.length<=1){ alert('Need at least one source.'); return; }
+      state.sources=state.sources.filter(s=>s!==src);
+      save(); populateSelects(); renderSourceChips(); renderSourceTabs(); renderSourceDetail();
+    });
+  });
+}
+
+function renderCategoryList(){
+  const cats=[...new Set(state.transactions.map(t=>t.category).filter(Boolean))];
+  document.getElementById('categoryList').innerHTML = cats.map(c=>`<option value="${c}">`).join('');
+}
+
+// ═══════════════ DASHBOARD ═══════════════
+function renderDashboard(){
+  const{bySource,totalExpense,totalIncome,totalBalance}=computeTotals();
+  const paymentsDue=computePaymentsDueTotal();
+  const ccOut=computeCCOutstanding();
+  let html=`
+    <div class="s-card wide accent-top">
+      <div class="lbl">Total Balance (All Sources)</div>
+      <div class="val">${fmt(totalBalance)}</div>
+    </div>
+  `;
+  state.sources.forEach(s=>{
+    const v=bySource[s]||0;
+    html+=`<div class="s-card"><div class="lbl"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colorFor(s)};margin-right:5px;"></span>${s}</div><div class="val ${v<0?'expense-val':''}">${fmt(v)}</div></div>`;
+  });
+  html+=`
+    <div class="s-card"><div class="lbl">Total Income</div><div class="val income-val">${fmt(totalIncome)}</div></div>
+    <div class="s-card"><div class="lbl">Total Expenses</div><div class="val expense-val">${fmt(totalExpense)}</div></div>
+    <div class="s-card ${paymentsDue>0?'':''}"><div class="lbl">Payments Due</div><div class="val ${paymentsDue>0?'expense-val':''}">${fmt(paymentsDue)}</div></div>
+    <div class="s-card"><div class="lbl">CC Outstanding</div><div class="val ${ccOut>0?'expense-val':''}">${fmt(ccOut)}</div></div>
+  `;
+  document.getElementById('summaryCards').innerHTML=html;
+}
+
+// ═══════════════ TRANSACTIONS ═══════════════
+let filterType='';
+document.querySelectorAll('[data-ftype]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    filterType=btn.dataset.ftype;
+    document.querySelectorAll('[data-ftype]').forEach(b=>b.classList.toggle('active',b===btn));
+    renderTxList();
+  });
+});
+document.getElementById('clearFilters').addEventListener('click',()=>{
+  document.getElementById('filterFrom').value='';
+  document.getElementById('filterTo').value='';
+  document.getElementById('filterSource').value='';
+  filterType='';
+  document.querySelectorAll('[data-ftype]').forEach(b=>b.classList.toggle('active',b.dataset.ftype===''));
+  renderTxList();
+});
+document.getElementById('filterSource').addEventListener('change',renderTxList);
+document.getElementById('filterFrom').addEventListener('change',renderTxList);
+document.getElementById('filterTo').addEventListener('change',renderTxList);
+
+function getFilteredTx(){
+  const src=document.getElementById('filterSource').value;
+  const from=document.getElementById('filterFrom').value;
+  const to=document.getElementById('filterTo').value;
+  return state.transactions
+    .filter(t=>!src||t.source===src)
+    .filter(t=>!filterType||t.type===filterType)
+    .filter(t=>!from||t.date>=from)
+    .filter(t=>!to||t.date<=to)
+    .sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+}
+
+function txRowHtml(t,showDel=true){
+  const isInc=t.type==='income';
+  return `<div class="tx-row">
+    <div class="tx-icon ${isInc?'inc':'exp'}">${isInc?'↑':'↓'}</div>
+    <div class="tx-info">
+      <div class="cat">${t.category||'—'}</div>
+      <div class="meta">${t.date} · <span style="color:${colorFor(t.source)}">${t.source}</span>${t.note?' · '+t.note:''}</div>
+    </div>
+    <div class="tx-amt ${isInc?'inc':'exp'}">${isInc?'+':'-'}${fmt(t.amount)}</div>
+    ${showDel?`<button class="tx-del" data-del="${t.id}">🗑</button>`:''}
+  </div>`;
+}
+
+function renderTxList(){
+  const list=getFilteredTx();
+  const cont=document.getElementById('txList');
+  const empty=document.getElementById('txEmpty');
+  if(!list.length){cont.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  cont.innerHTML=list.map(t=>txRowHtml(t)).join('');
+  cont.querySelectorAll('[data-del]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      if(confirm('Delete this transaction?')){
+        state.transactions=state.transactions.filter(t=>t.id!==Number(btn.dataset.del));
+        save();renderAll();
+      }
+    });
+  });
+}
+
+// ═══════════════ SOURCE DETAIL ═══════════════
+let activeDetailSource=null;
+function renderSourceTabs(){
+  const wrap=document.getElementById('sourceTabs');
+  if(!activeDetailSource||!state.sources.includes(activeDetailSource)) activeDetailSource=state.sources[0]||null;
+  wrap.innerHTML=state.sources.map(s=>`
+    <button class="pill-tab ${s===activeDetailSource?'active':''}" data-tab-src="${s}" style="${s===activeDetailSource?`color:${colorFor(s)};border-color:${colorFor(s)};`:''}">
+      <span class="dot" style="background:${colorFor(s)};"></span>${s}
+    </button>
+  `).join('');
+  wrap.querySelectorAll('[data-tab-src]').forEach(btn=>{
+    btn.addEventListener('click',()=>{activeDetailSource=btn.dataset.tabSrc;renderSourceTabs();renderSourceDetail();});
+  });
+}
+function renderSourceDetail(){
+  const src=activeDetailSource;
+  if(!src){document.getElementById('sourceDetailBalance').innerHTML='';document.getElementById('sourceDetailBody').innerHTML='';return;}
+  const txs=state.transactions.filter(t=>t.source===src).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+  let bal=0;txs.forEach(t=>{if(t.type==='income')bal+=t.amount;else bal-=t.amount;});
+  document.getElementById('sourceDetailBalance').innerHTML=`<span class="lbl">Balance</span><span class="val">${fmt(bal)}</span>`;
+  const body=document.getElementById('sourceDetailBody');
+  const empty=document.getElementById('sourceDetailEmpty');
+  if(!txs.length){body.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  body.innerHTML=txs.map(t=>txRowHtml(t,false)).join('');
+}
+
+// ═══════════════ PAYMENTS DUE ═══════════════
+function isOverdue(date,status){ return status!=='paid'&&date&&date<new Date().toISOString().slice(0,10); }
+
+function renderPaymentsDue(){
+  const list=document.getElementById('pdList');
+  const empty=document.getElementById('pdEmpty');
+  if(!state.payments.length){list.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  list.innerHTML=state.payments.map(p=>{
+    const ov=isOverdue(p.dueDate,p.status);
+    return `<div class="tx-row" style="${p.status==='paid'?'opacity:.5':''}">
+      <div class="tx-icon exp">💸</div>
+      <div class="tx-info">
+        <div class="cat">${p.who}</div>
+        <div class="meta">${p.type} ${p.dueDate?'· due '+p.dueDate:''} ${p.note?'· '+p.note:''}</div>
+        <div style="margin-top:4px;">
+          <span class="stag ${p.status==='paid'?'paid':ov?'overdue':'unpaid'}">${p.status==='paid'?'Paid':ov?'⚠ Overdue':'Unpaid'}</span>
+        </div>
+      </div>
+      <div class="tx-amt exp">${fmt(p.amount)}</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        ${p.status!=='paid'?`<button class="btn-ghost" data-pd-pay="${p.id}" style="font-size:11px;padding:5px 8px;">✓</button>`:''}
+        <button class="tx-del" data-pd-del="${p.id}">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-pd-pay]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const p=state.payments.find(x=>x.id===Number(btn.dataset.pdPay));
+      if(p){p.status='paid';save();renderAll();}
+    });
+  });
+  list.querySelectorAll('[data-pd-del]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      if(confirm('Delete this entry?')){
+        state.payments=state.payments.filter(p=>p.id!==Number(btn.dataset.pdDel));
+        save();renderAll();
+      }
+    });
+  });
+}
+
+document.getElementById('pdAddBtn').addEventListener('click',()=>{
+  const who=document.getElementById('pdWhoInput').value.trim();
+  const amount=parseFloat(document.getElementById('pdAmountInput').value);
+  const type=document.getElementById('pdTypeSelect').value;
+  const dueDate=document.getElementById('pdDueDateInput').value;
+  const note=document.getElementById('pdNoteInput').value.trim();
+  if(!who){alert('Please enter a name.');return;}
+  if(!amount||amount<=0){alert('Enter a valid amount.');return;}
+  state.payments.push({id:Date.now(),who,amount,type,dueDate,note,status:'unpaid'});
+  save();
+  document.getElementById('pdWhoInput').value='';
+  document.getElementById('pdAmountInput').value='';
+  document.getElementById('pdNoteInput').value='';
+  renderAll();
+});
+
+// ═══════════════ CREDIT CARD ═══════════════
+function renderCreditCard(){
+  const charged=state.ccTransactions.reduce((s,t)=>s+Number(t.amount||0),0);
+  const paid=state.ccBills.filter(b=>b.status==='paid').reduce((s,b)=>s+Number(b.amount||0),0);
+  const out=charged-paid;
+  document.getElementById('ccTotalCharged').textContent=fmt(charged);
+  document.getElementById('ccTotalPaid').textContent=fmt(paid);
+  document.getElementById('ccOutstandingCard').textContent=fmt(out);
+
+  // purchases
+  const txList=document.getElementById('ccTxList');
+  const txEmpty=document.getElementById('ccTxEmpty');
+  if(!state.ccTransactions.length){txList.innerHTML='';txEmpty.style.display='block';}
+  else{
+    txEmpty.style.display='none';
+    txList.innerHTML=[...state.ccTransactions].sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`
+      <div class="tx-row">
+        <div class="tx-icon exp">💳</div>
+        <div class="tx-info">
+          <div class="cat">${t.category||'—'}</div>
+          <div class="meta">${t.date}${t.note?' · '+t.note:''}</div>
+        </div>
+        <div class="tx-amt exp">${fmt(t.amount)}</div>
+        <button class="tx-del" data-cctx-del="${t.id}">🗑</button>
+      </div>
+    `).join('');
+    txList.querySelectorAll('[data-cctx-del]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        if(confirm('Delete purchase?')){state.ccTransactions=state.ccTransactions.filter(t=>t.id!==Number(btn.dataset.cctxDel));save();renderAll();}
+      });
+    });
+  }
+
+  // bills
+  const billList=document.getElementById('ccBillList');
+  const billEmpty=document.getElementById('ccBillEmpty');
+  if(!state.ccBills.length){billList.innerHTML='';billEmpty.style.display='block';}
+  else{
+    billEmpty.style.display='none';
+    billList.innerHTML=[...state.ccBills].sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||'')).map(b=>{
+      const ov=isOverdue(b.dueDate,b.status);
+      return `<div class="tx-row" style="${b.status==='paid'?'opacity:.5':''}">
+        <div class="tx-icon exp">🧾</div>
+        <div class="tx-info">
+          <div class="cat">${b.note||'Statement'}</div>
+          <div class="meta">${b.dueDate?'Due '+b.dueDate:''}${b.source?' · From: '+b.source:''}</div>
+          <div style="margin-top:4px;display:flex;gap:6px;align-items:center;">
+            <span class="stag ${b.status==='paid'?'paid':ov?'overdue':'unpaid'}">${b.status==='paid'?'Paid':ov?'⚠ Overdue':'Unpaid'}</span>
+            ${b.status!=='paid'?`<button class="btn-ghost" data-ccbill-pay="${b.id}" style="font-size:11px;padding:4px 8px;">Mark Paid</button>`:''}
+          </div>
+        </div>
+        <div class="tx-amt exp">${fmt(b.amount)}</div>
+        <button class="tx-del" data-ccbill-del="${b.id}">🗑</button>
+      </div>`;
+    }).join('');
+    billList.querySelectorAll('[data-ccbill-pay]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const b=state.ccBills.find(x=>x.id===Number(btn.dataset.ccbillPay));
+        if(!b||b.status==='paid') return;
+        if(b.source){
+          const txId=Date.now();
+          state.transactions.push({id:txId,type:'expense',amount:b.amount,source:b.source,category:'Credit Card Payment',date:new Date().toISOString().slice(0,10),note:'CC bill'+(b.note?' — '+b.note:'')});
+          b.payTxId=txId;
+        }
+        b.status='paid';save();renderAll();
+      });
+    });
+    billList.querySelectorAll('[data-ccbill-del]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const b=state.ccBills.find(x=>x.id===Number(btn.dataset.ccbillDel));
+        if(confirm('Delete statement?')){
+          if(b&&b.payTxId) state.transactions=state.transactions.filter(t=>t.id!==b.payTxId);
+          state.ccBills=state.ccBills.filter(x=>x.id!==Number(btn.dataset.ccbillDel));
+          save();renderAll();
+        }
+      });
+    });
+  }
+}
+
+document.getElementById('ccTxAddBtn').addEventListener('click',()=>{
+  const amount=parseFloat(document.getElementById('ccTxAmountInput').value);
+  const category=document.getElementById('ccTxCategoryInput').value.trim();
+  const date=document.getElementById('ccTxDateInput').value;
+  const note=document.getElementById('ccTxNoteInput').value.trim();
+  if(!amount||amount<=0){alert('Enter a valid amount.');return;}
+  state.ccTransactions.push({id:Date.now(),amount,category,date,note});
+  save();
+  document.getElementById('ccTxAmountInput').value='';
+  document.getElementById('ccTxCategoryInput').value='';
+  document.getElementById('ccTxNoteInput').value='';
+  renderAll();
+});
+document.getElementById('ccBillAddBtn').addEventListener('click',()=>{
+  const amount=parseFloat(document.getElementById('ccBillAmountInput').value);
+  const dueDate=document.getElementById('ccBillDueDateInput').value;
+  const source=document.getElementById('ccBillSourceSelect').value;
+  const note=document.getElementById('ccBillNoteInput').value.trim();
+  if(!amount||amount<=0){alert('Enter a valid amount.');return;}
+  state.ccBills.push({id:Date.now(),amount,dueDate,source,note,status:'unpaid',payTxId:null});
+  save();
+  document.getElementById('ccBillAmountInput').value='';
+  document.getElementById('ccBillNoteInput').value='';
+  renderAll();
+});
+
+// ═══════════════ FIXED EXPENSES ═══════════════
+let feCurrentMonth=new Date().toISOString().slice(0,7);
+function feMonthLabel(ym){ const[y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleDateString('en-US',{month:'long',year:'numeric'}); }
+
+function renderFixedExpenses(){
+  document.getElementById('feMonthLabel').textContent=feMonthLabel(feCurrentMonth);
+  const{total,paid,remaining}=computeFixedExpenseSummary();
+  document.getElementById('feTotalVal').textContent=fmt(total);
+  document.getElementById('fePaidVal').textContent=fmt(paid);
+  document.getElementById('feRemainingVal').textContent=fmt(remaining);
+  const list=document.getElementById('feList');
+  const empty=document.getElementById('feEmpty');
+  if(!state.fixedExpenses.length){list.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  list.innerHTML=state.fixedExpenses.map(fe=>{
+    const key=feCurrentMonth+':'+fe.id;
+    const isPaid=!!state.fixedExpensePaid[key];
+    return `<div class="fe-row" style="${isPaid?'background:rgba(34,197,94,0.04);padding:12px;border-radius:var(--radius-sm);margin-bottom:4px;border-bottom:none;':''}">
+      <div class="fe-row-info">
+        <div class="name">${fe.name}</div>
+        <div class="meta">${fe.category||''}${fe.source?' · '+fe.source:''}${fe.dueDay?' · Due '+fe.dueDay+(fe.dueDay==1?'st':fe.dueDay==2?'nd':fe.dueDay==3?'rd':'th'):''}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+        <span style="font-family:var(--mono);font-size:14px;font-weight:700;" class="${isPaid?'income-val':'expense-val'}">${fmt(fe.amount)}</span>
+        <button class="fe-toggle ${isPaid?'paid':'unpaid'}" data-fe-toggle="${fe.id}">${isPaid?'✓ Paid':'✗ Unpaid'}</button>
+      </div>
+      <button class="tx-del" data-fe-del="${fe.id}">🗑</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-fe-toggle]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const key=feCurrentMonth+':'+btn.dataset.feToggle;
+      if(state.fixedExpensePaid[key]) delete state.fixedExpensePaid[key];
+      else state.fixedExpensePaid[key]=true;
+      save();renderFixedExpenses();renderBalanceSheet();
+    });
+  });
+  list.querySelectorAll('[data-fe-del]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      if(confirm('Delete this fixed expense?')){
+        state.fixedExpenses=state.fixedExpenses.filter(fe=>fe.id!==Number(btn.dataset.feDel));
+        save();renderAll();
+      }
+    });
+  });
+}
+document.getElementById('feAddBtn').addEventListener('click',()=>{
+  const name=document.getElementById('feNameInput').value.trim();
+  const amount=parseFloat(document.getElementById('feAmountInput').value);
+  if(!name){alert('Enter expense name.');return;}
+  if(!amount||amount<=0){alert('Enter valid amount.');return;}
+  state.fixedExpenses.push({id:Date.now(),name,amount,category:document.getElementById('feCategoryInput').value.trim(),source:document.getElementById('feSourceSelect').value,dueDay:parseInt(document.getElementById('feDueDayInput').value)||null,note:document.getElementById('feNoteInput').value.trim()});
+  save();
+  ['feNameInput','feAmountInput','feCategoryInput','feDueDayInput','feNoteInput'].forEach(id=>document.getElementById(id).value='');
+  renderAll();
+});
+document.getElementById('fePrevMonth').addEventListener('click',()=>{
+  const[y,m]=feCurrentMonth.split('-').map(Number);
+  feCurrentMonth=new Date(y,m-2,1).toISOString().slice(0,7);
+  renderFixedExpenses();
+});
+document.getElementById('feNextMonth').addEventListener('click',()=>{
+  const[y,m]=feCurrentMonth.split('-').map(Number);
+  feCurrentMonth=new Date(y,m,1).toISOString().slice(0,7);
+  renderFixedExpenses();
+});
+document.getElementById('feExportBtn').addEventListener('click',()=>{
+  const rows=state.fixedExpenses.map(fe=>({Name:fe.name,Category:fe.category||'',Source:fe.source,'Due Day':fe.dueDay||'',Amount:fe.amount,Note:fe.note||'',['Paid ('+feCurrentMonth+')']:state.fixedExpensePaid[feCurrentMonth+':'+fe.id]?'Yes':'No'}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),"Fixed Expenses");
+  XLSX.writeFile(wb,`FixedExpenses_${feCurrentMonth}.xlsx`);
+});
+
+// ═══════════════ BALANCE SHEET ═══════════════
+function renderBalanceSheet(){
+  const{totalBalance}=computeTotals();
+  const paymentsDue=computePaymentsDueTotal();
+  const ccOut=computeCCOutstanding();
+  const{remaining:feRem}=computeFixedExpenseSummary();
+  const ext=state.bsAssets||{};
+  const cashAndBank=Math.max(0,totalBalance);
+  const property=Number(ext.property||0);
+  const vehicle=Number(ext.vehicle||0);
+  const investments=Number(ext.investments||0);
+  const gold=Number(ext.gold||0);
+  const otherA=Number(ext.other||0);
+  const totalAssets=cashAndBank+property+vehicle+investments+gold+otherA;
+  const totalLiab=paymentsDue+ccOut+feRem+Math.max(0,-totalBalance);
+  const net=totalAssets-totalLiab;
+
+  document.getElementById('bsAssetsBody').innerHTML=[
+    {l:'Cash & Bank Balances',v:cashAndBank},
+    {l:'Property / Real Estate',v:property},
+    {l:'Vehicle(s)',v:vehicle},
+    {l:'Investments / Stocks',v:investments},
+    {l:'Gold / Jewelry',v:gold},
+    {l:'Other Assets',v:otherA},
+  ].map(i=>`<div class="bs-item"><span class="k">${i.l}</span><span class="v" style="color:${i.v>0?'var(--income)':'var(--text-dim)'};">${fmt(i.v)}</span></div>`).join('');
+  document.getElementById('bsTotalAssets').textContent=fmt(totalAssets);
+
+  document.getElementById('bsLiabilitiesBody').innerHTML=[
+    {l:'Payments Due / Borrowed',v:paymentsDue},
+    {l:'Credit Card Outstanding',v:ccOut},
+    {l:'Fixed Expenses Remaining',v:feRem},
+    {l:'Negative Account Balances',v:Math.max(0,-totalBalance)},
+  ].map(i=>`<div class="bs-item"><span class="k">${i.l}</span><span class="v" style="color:${i.v>0?'var(--expense)':'var(--text-dim)'};">${fmt(i.v)}</span></div>`).join('');
+  document.getElementById('bsTotalLiabilities').textContent=fmt(totalLiab);
+
+  const nw=document.getElementById('bsNetWorth');
+  nw.textContent=fmt(net);
+  nw.style.color=net>=0?'var(--income)':'var(--expense)';
+}
+function loadBsInputs(){
+  const a=state.bsAssets||{};
+  [{id:'bsProperty',k:'property'},{id:'bsVehicle',k:'vehicle'},{id:'bsInvestments',k:'investments'},{id:'bsGold',k:'gold'},{id:'bsOtherAssets',k:'other'}].forEach(({id,k})=>{
+    document.getElementById(id).value=a[k]||'';
+  });
+}
+document.getElementById('bsSaveBtn').addEventListener('click',()=>{
+  state.bsAssets={
+    property:parseFloat(document.getElementById('bsProperty').value)||0,
+    vehicle:parseFloat(document.getElementById('bsVehicle').value)||0,
+    investments:parseFloat(document.getElementById('bsInvestments').value)||0,
+    gold:parseFloat(document.getElementById('bsGold').value)||0,
+    other:parseFloat(document.getElementById('bsOtherAssets').value)||0,
+  };
+  save();renderBalanceSheet();
+});
+
+// ═══════════════ ADD TRANSACTION ═══════════════
+let currentType='expense';
+document.getElementById('typeExpenseBtn').addEventListener('click',()=>{
+  currentType='expense';
+  document.getElementById('typeExpenseBtn').classList.add('active');
+  document.getElementById('typeIncomeBtn').classList.remove('active');
+});
+document.getElementById('typeIncomeBtn').addEventListener('click',()=>{
+  currentType='income';
+  document.getElementById('typeIncomeBtn').classList.add('active');
+  document.getElementById('typeExpenseBtn').classList.remove('active');
+});
+document.getElementById('addBtn').addEventListener('click',()=>{
+  const amount=parseFloat(document.getElementById('amountInput').value);
+  const source=document.getElementById('sourceSelect').value;
+  const category=document.getElementById('categoryInput').value.trim();
+  const date=document.getElementById('dateInput').value;
+  const note=document.getElementById('noteInput').value.trim();
+  if(!amount||amount<=0){alert('Enter a valid amount.');return;}
+  if(!source){alert('Select a source.');return;}
+  if(!date){alert('Select a date.');return;}
+  state.transactions.push({id:Date.now(),type:currentType,amount,source,category,date,note});
+  save();
+  document.getElementById('amountInput').value='';
+  document.getElementById('categoryInput').value='';
+  document.getElementById('noteInput').value='';
+  renderAll();
+});
+
+// ═══════════════ SOURCE MANAGEMENT ═══════════════
+document.getElementById('addSourceBtn').addEventListener('click',()=>{
+  const name=document.getElementById('newSourceInput').value.trim();
+  if(!name){alert('Enter a source name.');return;}
+  if(state.sources.includes(name)){alert('Source already exists.');return;}
+  state.sources.push(name);
+  save();
+  document.getElementById('newSourceInput').value='';
+  populateSelects();renderSourceChips();renderSourceTabs();renderDashboard();
+});
+
+// ═══════════════ EXPORT / BACKUP ═══════════════
+document.getElementById('exportExcelBtn').addEventListener('click',()=>{
+  const rows=getFilteredTx().map(t=>({Date:t.date,Type:t.type,Source:t.source,Category:t.category||'',Note:t.note||'',Amount:t.amount}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),"Transactions");
+  XLSX.writeFile(wb,`Ledger_${new Date().toISOString().slice(0,10)}.xlsx`);
+});
+document.getElementById('exportPdfBtn').addEventListener('click',()=>{
+  const{jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  doc.setFontSize(14);doc.text('Home Ledger — Transactions',14,15);
+  const list=getFilteredTx();
+  doc.autoTable({head:[['Date','Type','Source','Category','Note','Amount']],body:list.map(t=>[t.date,t.type,t.source,t.category||'',t.note||',',fmt(t.amount)]),startY:22,styles:{fontSize:9}});
+  doc.save(`Ledger_${new Date().toISOString().slice(0,10)}.pdf`);
+});
+document.getElementById('backupBtn').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`LedgerBackup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+});
+document.getElementById('restoreBtn').addEventListener('click',()=>document.getElementById('restoreFileInput').click());
+document.getElementById('restoreFileInput').addEventListener('change',e=>{
+  const file=e.target.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const data=JSON.parse(ev.target.result);
+      if(!data.sources||!data.transactions) throw new Error('Invalid');
+      if(!confirm('Restore backup? Current data will be overwritten.')) return;
+      state=data;
+      if(!state.payments) state.payments=[];
+      if(!state.ccTransactions) state.ccTransactions=[];
+      if(!state.ccBills) state.ccBills=[];
+      if(!state.fixedExpenses) state.fixedExpenses=[];
+      if(!state.fixedExpensePaid) state.fixedExpensePaid={};
+      if(!state.bsAssets) state.bsAssets={property:0,vehicle:0,investments:0,gold:0,other:0};
+      state.ccBills.forEach(b=>{if(!('payTxId' in b)) b.payTxId=null; if(!b.source) b.source=state.sources[0]||'';});
+      save();populateSelects();renderSourceChips();loadBsInputs();renderAll();
+      alert('Backup restored.');
+    }catch{alert('Invalid backup file.');}
+  };
+  reader.readAsText(file);
+  e.target.value='';
+});
+
+// ═══════════════ RENDER ALL ═══════════════
+function renderAll(){
+  renderDashboard();
+  renderTxList();
+  renderSourceTabs();
+  renderSourceDetail();
+  renderCategoryList();
+  renderPaymentsDue();
+  renderCreditCard();
+  renderFixedExpenses();
+  renderBalanceSheet();
+}
+
+// ═══════════════ INIT ═══════════════
+function init(){
+  document.getElementById('todayPill').textContent=new Date().toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'});
+  document.getElementById('dateInput').value=new Date().toISOString().slice(0,10);
+  document.getElementById('ccTxDateInput').value=new Date().toISOString().slice(0,10);
+  populateSelects();
+  renderSourceChips();
+  loadBsInputs();
+  renderAll();
+}
+init();
+
+// ═══════════════ SERVICE WORKER ═══════════════
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
